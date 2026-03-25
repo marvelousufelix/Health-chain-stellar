@@ -4,7 +4,10 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { OrganizationEntity } from '../../organizations/entities/organization.entity';
 
 @Entity('users')
 export class UserEntity {
@@ -26,6 +29,9 @@ export class UserEntity {
   @Column({ nullable: true })
   phoneNumber: string;
 
+  @Column({ name: 'organization_id', type: 'uuid', nullable: true })
+  organizationId?: string | null;
+
   @Column({ name: 'password_hash', nullable: true })
   passwordHash?: string;
 
@@ -37,6 +43,13 @@ export class UserEntity {
 
   @Column({ name: 'password_history', type: 'simple-json', nullable: true })
   passwordHistory?: string[];
+
+  @ManyToOne(() => OrganizationEntity, (organization) => organization.users, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'organization_id' })
+  organization?: OrganizationEntity | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
