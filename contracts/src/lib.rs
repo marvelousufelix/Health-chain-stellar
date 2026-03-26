@@ -46,11 +46,13 @@ pub enum Error {
     DisputeAlreadyExists = 21,
     InvalidPaymentStatus = 22,
     /// Unit ID string exceeds maximum allowed length.
-    UnitIdTooLong = 18,
+    UnitIdTooLong = 25,
     /// SuperAdmin nomination has expired.
     NominationExpired = 23,
     /// A pending nomination already exists.
     NominationPending = 24,
+    /// Overflow/underflow detected during quantity arithmetic.
+    ArithmeticError = 25,
 }
 
 // Alias for issue/docs terminology.
@@ -210,7 +212,6 @@ pub struct RequestKey {
     pub quantity_ml: u32,
     pub urgency: UrgencyLevel,
     pub required_by: u64,
-    pub delivery_address: String,
 }
 
 /// Event data for blood registration
@@ -307,32 +308,55 @@ pub struct DisputeResolvedEvent {
     pub resolved_at: u64,
 }
 
-/// Storage keys
-const BLOOD_UNITS: Symbol = symbol_short!("UNITS");
-const NEXT_ID: Symbol = symbol_short!("NEXT_ID");
-const BLOOD_BANKS: Symbol = symbol_short!("BANKS");
-const HOSPITALS: Symbol = symbol_short!("HOSPS");
-const ADMIN: Symbol = symbol_short!("ADMIN");
-const REQUESTS: Symbol = symbol_short!("REQUESTS");
-const NEXT_REQUEST_ID: Symbol = symbol_short!("NEXT_REQ");
-const REQUEST_KEYS: Symbol = symbol_short!("REQ_KEYS");
-const BLOOD_REQUESTS: Symbol = symbol_short!("REQS");
-const PAYMENTS: Symbol = symbol_short!("PAY_RECS");
-const NEXT_PAYMENT_ID: Symbol = symbol_short!("NPAY_ID");
-const DISPUTES: Symbol = symbol_short!("DISP_REC");
-const NEXT_DISPUTE_ID: Symbol = symbol_short!("NDIS_ID");
+/// Storage key literals (compile-time guarded for `symbol_short!` compatibility).
+const BLOOD_UNITS_KEY: &str = "UNITS";
+const NEXT_ID_KEY: &str = "NEXT_ID";
+const BLOOD_BANKS_KEY: &str = "BANKS";
+const HOSPITALS_KEY: &str = "HOSPS";
+const ADMIN_KEY: &str = "ADMIN";
+const REQUESTS_KEY: &str = "REQUESTS";
+const NEXT_REQUEST_ID_KEY: &str = "NEXT_REQ";
+const REQUEST_KEYS_KEY: &str = "REQ_KEYS";
+const BLOOD_REQUESTS_KEY: &str = "REQS";
+const PAYMENTS_KEY: &str = "PAY_RECS";
+const NEXT_PAYMENT_ID_KEY: &str = "NPAY_ID";
+const DISPUTES_KEY: &str = "DISP_REC";
+const NEXT_DISPUTE_ID_KEY: &str = "NDIS_ID";
+const CUSTODY_EVENTS_KEY: &str = "CUSTODY";
+const HISTORY_KEY: &str = "HISTORY";
 
-// Validation constants
-const MIN_QUANTITY_ML: u32 = 50; // Minimum 50ml
-const MAX_QUANTITY_ML: u32 = 500; // Maximum 500ml per unit
-const MIN_SHELF_LIFE_DAYS: u64 = 1; // At least 1 day shelf life
-const MAX_SHELF_LIFE_DAYS: u64 = 42; // Maximum 42 days for whole blood
-const MIN_REQUEST_ML: u32 = 50; // Minimum request amount
-const MAX_REQUEST_ML: u32 = 5000; // Maximum request amount
-const MAX_BATCH_SIZE: u32 = 100; // Maximum batch size for operations
+const _: () = assert!(BLOOD_UNITS_KEY.len() <= 9);
+const _: () = assert!(NEXT_ID_KEY.len() <= 9);
+const _: () = assert!(BLOOD_BANKS_KEY.len() <= 9);
+const _: () = assert!(HOSPITALS_KEY.len() <= 9);
+const _: () = assert!(ADMIN_KEY.len() <= 9);
+const _: () = assert!(REQUESTS_KEY.len() <= 9);
+const _: () = assert!(NEXT_REQUEST_ID_KEY.len() <= 9);
+const _: () = assert!(REQUEST_KEYS_KEY.len() <= 9);
+const _: () = assert!(BLOOD_REQUESTS_KEY.len() <= 9);
+const _: () = assert!(PAYMENTS_KEY.len() <= 9);
+const _: () = assert!(NEXT_PAYMENT_ID_KEY.len() <= 9);
+const _: () = assert!(DISPUTES_KEY.len() <= 9);
+const _: () = assert!(NEXT_DISPUTE_ID_KEY.len() <= 9);
+const _: () = assert!(CUSTODY_EVENTS_KEY.len() <= 9);
+const _: () = assert!(HISTORY_KEY.len() <= 9);
 
-// Transfer expiry window (30 minutes)
-const TRANSFER_EXPIRY_SECONDS: u64 = 1800;
+/// Storage keys (single source of truth)
+pub(crate) const BLOOD_UNITS: Symbol = symbol_short!("UNITS");
+pub(crate) const NEXT_ID: Symbol = symbol_short!("NEXT_ID");
+pub(crate) const BLOOD_BANKS: Symbol = symbol_short!("BANKS");
+pub(crate) const HOSPITALS: Symbol = symbol_short!("HOSPS");
+pub(crate) const ADMIN: Symbol = symbol_short!("ADMIN");
+pub(crate) const REQUESTS: Symbol = symbol_short!("REQUESTS");
+pub(crate) const NEXT_REQUEST_ID: Symbol = symbol_short!("NEXT_REQ");
+pub(crate) const REQUEST_KEYS: Symbol = symbol_short!("REQ_KEYS");
+pub(crate) const BLOOD_REQUESTS: Symbol = symbol_short!("REQS");
+pub(crate) const PAYMENTS: Symbol = symbol_short!("PAY_RECS");
+pub(crate) const NEXT_PAYMENT_ID: Symbol = symbol_short!("NPAY_ID");
+pub(crate) const DISPUTES: Symbol = symbol_short!("DISP_REC");
+pub(crate) const NEXT_DISPUTE_ID: Symbol = symbol_short!("NDIS_ID");
+pub(crate) const CUSTODY_EVENTS: Symbol = symbol_short!("CUSTODY");
+pub(crate) const HISTORY: Symbol = symbol_short!("HISTORY");
 /// Storage key enumeration for composite keys
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -354,20 +378,6 @@ pub struct TrailMetadata {
     pub total_events: u32,
     pub total_pages: u32,
 }
-
-/// Storage keys
-pub(crate) const BLOOD_UNITS: Symbol = symbol_short!("UNITS");
-pub(crate) const NEXT_ID: Symbol = symbol_short!("NEXT_ID");
-pub(crate) const BLOOD_BANKS: Symbol = symbol_short!("BANKS");
-pub(crate) const HOSPITALS: Symbol = symbol_short!("HOSPS");
-pub(crate) const ADMIN: Symbol = symbol_short!("ADMIN");
-pub(crate) const REQUESTS: Symbol = symbol_short!("REQUESTS");
-pub(crate) const NEXT_REQUEST_ID: Symbol = symbol_short!("NEXT_REQ");
-pub(crate) const REQUEST_KEYS: Symbol = symbol_short!("REQ_KEYS");
-pub(crate) const CUSTODY_EVENTS: Symbol = symbol_short!("CUSTODY");
-
-// History storage key
-pub(crate) const HISTORY: Symbol = symbol_short!("HISTORY");
 
 // Re-export constants for internal use
 pub(crate) use constants::{
@@ -1002,9 +1012,11 @@ impl HealthChainContract {
         // Emit event
         env.events().publish(
             (symbol_short!("blood"), symbol_short!("tr_cancel")),
-            (unit_id, current_time),
-            (symbol_short!("custody"), symbol_short!("cancel")),
-            custody_event,
+            (
+                (unit_id, current_time),
+                (symbol_short!("custody"), symbol_short!("cancel")),
+                custody_event,
+            ),
         );
 
         Ok(())
@@ -1495,13 +1507,14 @@ impl HealthChainContract {
             return Err(Error::InvalidRequiredBy);
         }
 
+        // Normalize dedup semantics by excluding free-form delivery address text:
+        // equivalent logical requests should map to one key even if address case/spacing differs.
         let request_key = RequestKey {
             hospital_id: hospital_id.clone(),
             blood_type,
             quantity_ml,
             urgency,
             required_by,
-            delivery_address: delivery_address.clone(),
         };
 
         let mut request_keys: Map<RequestKey, u64> = env
@@ -1600,7 +1613,9 @@ impl HealthChainContract {
 
         payments.set(payment_id, payment);
         env.storage().persistent().set(&PAYMENTS, &payments);
-        env.storage().instance().set(&NEXT_PAYMENT_ID, &(payment_id + 1));
+        env.storage()
+            .instance()
+            .set(&NEXT_PAYMENT_ID, &(payment_id + 1));
 
         Ok(payment_id)
     }
@@ -1656,7 +1671,9 @@ impl HealthChainContract {
 
         disputes.set(dispute_id, dispute);
         env.storage().persistent().set(&DISPUTES, &disputes);
-        env.storage().instance().set(&NEXT_DISPUTE_ID, &(dispute_id + 1));
+        env.storage()
+            .instance()
+            .set(&NEXT_DISPUTE_ID, &(dispute_id + 1));
 
         // Update Request Status if possible
         let mut requests: Map<u64, BloodRequest> = env
@@ -1717,7 +1734,9 @@ impl HealthChainContract {
             .get(&PAYMENTS)
             .ok_or(Error::PaymentNotFound)?;
 
-        let mut payment = payments.get(dispute.payment_id).ok_or(Error::PaymentNotFound)?;
+        let mut payment = payments
+            .get(dispute.payment_id)
+            .ok_or(Error::PaymentNotFound)?;
 
         dispute.status = resolution;
         dispute.resolved_at = Some(env.ledger().timestamp());
@@ -1725,7 +1744,7 @@ impl HealthChainContract {
         env.storage().persistent().set(&DISPUTES, &disputes);
 
         payment.status = PaymentStatus::Resolved;
-        
+
         // Handle funds based on resolution
         match resolution {
             DisputeStatus::ResolvedInFavorOfPayer => {
@@ -1850,7 +1869,9 @@ impl HealthChainContract {
                 return Err(Error::UnitExpired);
             }
 
-            total_quantity = total_quantity.saturating_add(unit.quantity);
+            total_quantity = total_quantity
+                .checked_add(unit.quantity)
+                .ok_or(Error::ArithmeticError)?;
         }
 
         // Reserve units to the requesting hospital.
@@ -1912,7 +1933,7 @@ impl HealthChainContract {
                 fulfillment_percentage: Self::calculate_fulfillment_percentage(
                     request.quantity_ml,
                     total_quantity,
-                ),
+                )?,
                 status: request.status,
             },
         );
@@ -2041,7 +2062,9 @@ impl HealthChainContract {
             unit.status = BloodStatus::Delivered;
             let current_time = env.ledger().timestamp();
             unit.delivery_timestamp = Some(current_time);
-            delivered_quantity = delivered_quantity.saturating_add(unit.quantity);
+            delivered_quantity = delivered_quantity
+                .checked_add(unit.quantity)
+                .ok_or(Error::ArithmeticError)?;
 
             units.set(unit_id, unit.clone());
 
@@ -2117,13 +2140,19 @@ impl HealthChainContract {
         }
     }
 
-    fn calculate_fulfillment_percentage(requested_quantity: u32, fulfilled_quantity: u32) -> u32 {
+    fn calculate_fulfillment_percentage(
+        requested_quantity: u32,
+        fulfilled_quantity: u32,
+    ) -> Result<u32, Error> {
         if requested_quantity == 0 {
-            return 0;
+            return Ok(0);
         }
 
-        let percentage = fulfilled_quantity.saturating_mul(100) / requested_quantity;
-        percentage.min(100)
+        let percentage = fulfilled_quantity
+            .checked_mul(100)
+            .ok_or(Error::ArithmeticError)?
+            / requested_quantity;
+        Ok(percentage.min(100))
     }
 
     // ── SUPER ADMIN TWO-STEP TRANSFER ────────────────────────────────────────────────────
@@ -2156,7 +2185,10 @@ impl HealthChainContract {
 
         env.storage().instance().set(
             &DataKey::PendingNominee,
-            &NominationEntry { nominee, nominated_at: now },
+            &NominationEntry {
+                nominee,
+                nominated_at: now,
+            },
         );
         Ok(())
     }
@@ -2366,8 +2398,6 @@ impl HealthChainContract {
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::testutils::Ledger;
-    use soroban_sdk::IntoVal;
     use soroban_sdk::{
         symbol_short, testutils::Address as _, testutils::Events, testutils::Ledger as _, Address,
         Env, IntoVal, String, Symbol, TryFromVal,
@@ -3557,6 +3587,36 @@ mod test {
     }
 
     #[test]
+    #[should_panic(expected = "Error(Contract, #13)")]
+    fn test_create_request_duplicate_request_with_delivery_case_and_spacing_variations() {
+        let env = Env::default();
+        let (_, _, hospital, client) = setup_contract_with_hospital(&env);
+
+        env.mock_all_auths();
+        let current_time = env.ledger().timestamp();
+        let required_by = current_time + 7200;
+
+        client.create_request(
+            &hospital,
+            &BloodType::APositive,
+            &400,
+            &UrgencyLevel::High,
+            &required_by,
+            &String::from_str(&env, " Ward   7B, ICU "),
+        );
+
+        // Same logical request, delivery text variant only.
+        client.create_request(
+            &hospital,
+            &BloodType::APositive,
+            &400,
+            &UrgencyLevel::High,
+            &required_by,
+            &String::from_str(&env, "ward 7b, icu"),
+        );
+    }
+
+    #[test]
     fn test_create_request_event_payload() {
         let env = Env::default();
         let (contract_id, _, hospital, client) = setup_contract_with_hospital(&env);
@@ -3757,6 +3817,115 @@ mod test {
         let unit_ids = vec![&env, 1u64];
         env.mock_all_auths();
         client.approve_request(&non_bank, &request_id, &unit_ids);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #25)")] // ArithmeticError
+    fn test_approve_request_fails_on_total_quantity_overflow() {
+        let env = Env::default();
+        let (contract_id, _, hospital, client) = setup_contract_with_hospital(&env);
+
+        let bank = Address::generate(&env);
+        env.mock_all_auths();
+        client.register_blood_bank(&bank);
+
+        let current_time = env.ledger().timestamp();
+        let expiration = current_time + (7 * 86400);
+
+        let unit_id_1 = client.add_blood_unit(
+            &BloodType::APositive,
+            &500,
+            &expiration,
+            &symbol_short!("donor1"),
+            &symbol_short!("bank"),
+        );
+        let unit_id_2 = client.add_blood_unit(
+            &BloodType::APositive,
+            &500,
+            &expiration,
+            &symbol_short!("donor2"),
+            &symbol_short!("bank"),
+        );
+
+        env.as_contract(&contract_id, || {
+            let mut units: Map<u64, BloodUnit> = env
+                .storage()
+                .persistent()
+                .get(&BLOOD_UNITS)
+                .unwrap_or(Map::new(&env));
+
+            let mut unit_1 = units.get(unit_id_1).unwrap();
+            unit_1.quantity = u32::MAX;
+            units.set(unit_id_1, unit_1);
+
+            let mut unit_2 = units.get(unit_id_2).unwrap();
+            unit_2.quantity = 1;
+            units.set(unit_id_2, unit_2);
+
+            env.storage().persistent().set(&BLOOD_UNITS, &units);
+        });
+
+        let request_id = client.create_request(
+            &hospital,
+            &BloodType::APositive,
+            &500,
+            &UrgencyLevel::Urgent,
+            &(current_time + 3600),
+            &String::from_str(&env, "Ward O1"),
+        );
+
+        let unit_ids = vec![&env, unit_id_1, unit_id_2];
+        env.mock_all_auths();
+        client.approve_request(&bank, &request_id, &unit_ids);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #25)")] // ArithmeticError
+    fn test_approve_request_fails_on_fulfillment_percentage_overflow() {
+        let env = Env::default();
+        let (contract_id, _, hospital, client) = setup_contract_with_hospital(&env);
+
+        let bank = Address::generate(&env);
+        env.mock_all_auths();
+        client.register_blood_bank(&bank);
+
+        let current_time = env.ledger().timestamp();
+        let expiration = current_time + (7 * 86400);
+
+        let unit_id = client.add_blood_unit(
+            &BloodType::OPositive,
+            &500,
+            &expiration,
+            &symbol_short!("donor1"),
+            &symbol_short!("bank"),
+        );
+
+        env.as_contract(&contract_id, || {
+            let mut units: Map<u64, BloodUnit> = env
+                .storage()
+                .persistent()
+                .get(&BLOOD_UNITS)
+                .unwrap_or(Map::new(&env));
+
+            let mut unit = units.get(unit_id).unwrap();
+            unit.quantity = u32::MAX;
+            units.set(unit_id, unit);
+
+            env.storage().persistent().set(&BLOOD_UNITS, &units);
+        });
+
+        let request_id = client.create_request(
+            &hospital,
+            &BloodType::OPositive,
+            &50,
+            &UrgencyLevel::Routine,
+            &(current_time + 3600),
+            &String::from_str(&env, "Ward O2"),
+        );
+
+        let unit_ids = vec![&env, unit_id];
+        env.mock_all_auths();
+        client.approve_request(&bank, &request_id, &unit_ids);
     }
 
     // Request Status Management Tests
@@ -4064,6 +4233,74 @@ mod test {
         let unit_ids = vec![&env, 1u64];
         env.mock_all_auths();
         client.fulfill_request(&hospital, &request_id, &unit_ids);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #25)")] // ArithmeticError
+    fn test_fulfill_request_fails_on_delivered_quantity_overflow() {
+        let env = Env::default();
+        let (contract_id, _, hospital, client) = setup_contract_with_hospital(&env);
+
+        let bank = Address::generate(&env);
+        env.mock_all_auths();
+        client.register_blood_bank(&bank);
+
+        let current_time = env.ledger().timestamp();
+        let expiration = current_time + (7 * 86400);
+
+        let unit_id_1 = client.register_blood(
+            &bank,
+            &BloodType::BPositive,
+            &250,
+            &expiration,
+            &Some(symbol_short!("d1")),
+        );
+        let unit_id_2 = client.register_blood(
+            &bank,
+            &BloodType::BPositive,
+            &250,
+            &expiration,
+            &Some(symbol_short!("d2")),
+        );
+
+        env.mock_all_auths();
+        client.allocate_blood(&bank, &unit_id_1, &hospital);
+        env.mock_all_auths();
+        client.allocate_blood(&bank, &unit_id_2, &hospital);
+
+        let request_id = client.create_request(
+            &hospital,
+            &BloodType::BPositive,
+            &500,
+            &UrgencyLevel::Urgent,
+            &(current_time + 3600),
+            &String::from_str(&env, "Ward F1"),
+        );
+
+        let unit_ids = vec![&env, unit_id_1, unit_id_2];
+        env.mock_all_auths();
+        client.approve_request(&bank, &request_id, &unit_ids);
+
+        env.as_contract(&contract_id, || {
+            let mut units: Map<u64, BloodUnit> = env
+                .storage()
+                .persistent()
+                .get(&BLOOD_UNITS)
+                .unwrap_or(Map::new(&env));
+
+            let mut unit_1 = units.get(unit_id_1).unwrap();
+            unit_1.quantity = u32::MAX;
+            units.set(unit_id_1, unit_1);
+
+            let mut unit_2 = units.get(unit_id_2).unwrap();
+            unit_2.quantity = 1;
+            units.set(unit_id_2, unit_2);
+
+            env.storage().persistent().set(&BLOOD_UNITS, &units);
+        });
+
+        env.mock_all_auths();
+        client.fulfill_request(&bank, &request_id, &unit_ids);
     }
 
     #[test]

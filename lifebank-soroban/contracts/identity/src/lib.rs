@@ -12,19 +12,11 @@ use soroban_sdk::{
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum Error {
-    InvalidInput = 1,
-    LicenseAlreadyRegistered = 2,
-    InvalidOrgType = 3,
-    AlreadyInitialized = 4,
-    Unauthorized = 5,
-    InvalidRating = 6,
-    AlreadyRated = 7,
-    OrganizationNotFound = 8,
-    InteractionNotVerified = 9,
-    BadgeAlreadyAwarded = 10,
-    DeliveryNotFound = 11,
-    InvalidDeliveryProof = 12,
-    BadgeNotFound = 13,
+    InvalidInput = 200,
+    LicenseAlreadyRegistered = 201,
+    InvalidOrgType = 202,
+    AlreadyInitialized = 203,
+    Unauthorized = 204,
 }
 
 // ---------------------------------------------------------------------------
@@ -634,9 +626,11 @@ impl IdentityContract {
     }
 }
 
-// ---------------------------------------------------------------------------
-// AccessControlContract
-// ---------------------------------------------------------------------------
+    /// Get organization by ID
+    pub fn get_organization(env: Env, org_id: Address) -> Option<Organization> {
+        env.storage().persistent().get(&DataKey::Org(org_id))
+    }
+}
 
 #[contract]
 pub struct AccessControlContract;

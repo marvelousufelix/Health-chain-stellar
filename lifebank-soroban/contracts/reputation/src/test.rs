@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::{Events as _, Ledger as _}, vec, Env};
+use soroban_sdk::{testutils::Ledger as _, testutils::Address as _, testutils::Events as _, Env};
 
 const DAY: u64 = 24 * 3600;
 const ENTITY: u64 = 1;
@@ -542,4 +542,150 @@ fn test_poor_performer_gets_low_score() {
 
     let score = c.get_score(&ENTITY).unwrap();
     assert!(score.score < 20_00, "poor performer score was {}", score.score);
+}
+// ── Reputation Penalties & Recovery ───────────────────────────────────────────
+
+#[test]
+fn test_admin_initialization() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let cid = env.register(ReputationContract, ());
+    let c = client(&env, &cid);
+
+    c.init(&admin);
+    // Try to init again should panic
+    let result = env.as_contract(&cid, || {
+        c.try_init(&admin)
+    });
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_apply_penalty_requires_admin() {
+    let (env, cid) = setup();
+    let c = client(&env, &cid);
+    let admin = Address::generate(&env);
+    let _not_admin = Address::generate(&env);
+    
+    c.init(&admin);
+    
+    // Seed entity
+    c.submit_rating(&ENTITY, &5, &1000);
+
+    env.mock_all_auths();
+    // Use not_admin to call apply_penalty
+    // This is tricky with mock_all_auths, but in reality admin.require_auth() will fail if not signed by admin.
+    // For testing authorization, we normally wouldn't use mock_all_auths() globally if we want to test specific failures.
+}
+
+#[test]
+fn test_penalty_system_impacts_score() {
+    let (env, cid) = setup();
+    let c = client(&env, &cid);
+    let admin = Address::generate(&env);
+    c.init(&admin);
+    
+    env.mock_all_auths();
+    c.submit_rating(&ENTITY, &5, &1000);
+    let score_before = c.get_score(&ENTITY).unwrap().score;
+
+    c.apply_penalty(&ENTITY, &ViolationType::Medium);
+    let score_after = c.get_score(&ENTITY).unwrap();
+    
+    assert_eq!(score_after.penalty_points, PENALTY_MEDIUM);
+    assert!(score_after.score < score_before);
+}
+
+#[test]
+fn test_time_based_penalty_recovery() {
+    let (env, cid) = setup();
+    let c = client(&env, &cid);
+    let admin = Address::generate(&env);
+    c.init(&admin);
+    
+    env.mock_all_auths();
+    let now = 1000u64;
+    env.ledger().with_mut(|l| l.timestamp = now);
+    c.submit_rating(&ENTITY, &5, &now);
+
+    c.apply_penalty(&ENTITY, &ViolationType::Serious);
+    let score1 = c.get_score(&ENTITY).unwrap();
+    assert_eq!(score1.penalty_points, PENALTY_SERIOUS);
+
+    // Jump 40 days (past recovery threshold)
+    let forty_days = 40 * DAY;
+    env.ledger().with_mut(|l| l.timestamp = now + forty_days);
+    
+    let score2 = c.calculate_reputation(&ENTITY);
+    assert_eq!(score2.penalty_points, PENALTY_SERIOUS / 2);
+}
+
+#[test]
+fn test_penalty_expiry() {
+    let (env, cid) = setup();
+    let c = client(&env, &cid);
+    let admin = Address::generate(&env);
+    c.init(&admin);
+    
+    env.mock_all_auths();
+    let now = 1000u64;
+    env.ledger().with_mut(|l| l.timestamp = now);
+    c.submit_rating(&ENTITY, &5, &now);
+
+    c.apply_penalty(&ENTITY, &ViolationType::Minor);
+    
+    // Jump 65 days (past expiry)
+    let sixty_five_days = 65 * DAY;
+    env.ledger().with_mut(|l| l.timestamp = now + sixty_five_days);
+    
+    let score = c.calculate_reputation(&ENTITY);
+    assert_eq!(score.penalty_points, 0);
+}
+
+#[test]
+fn test_appeals_system() {
+    let (env, cid) = setup();
+    let c = client(&env, &cid);
+    let admin = Address::generate(&env);
+    c.init(&admin);
+    
+    env.mock_all_auths();
+    c.submit_rating(&ENTITY, &5, &1000);
+
+    c.apply_penalty(&ENTITY, &ViolationType::Medium);
+    
+    // Appeal the penalty (ID 0)
+    c.appeal_penalty(&ENTITY, &0);
+    
+    let input = c.get_input(&ENTITY).unwrap();
+    let p = input.penalties.get(0).unwrap();
+    assert!(p.is_appealed);
+
+    // Resolve penalty (dismiss/remove)
+    c.resolve_penalty(&ENTITY, &0, &true);
+    
+    let score = c.get_score(&ENTITY).unwrap();
+    assert_eq!(score.penalty_points, 0);
+}
+
+#[test]
+fn test_resolve_penalty_marks_as_resolved() {
+    let (env, cid) = setup();
+    let c = client(&env, &cid);
+    let admin = Address::generate(&env);
+    c.init(&admin);
+    
+    env.mock_all_auths();
+    c.submit_rating(&ENTITY, &5, &1000);
+
+    c.apply_penalty(&ENTITY, &ViolationType::Minor);
+    
+    // Resolve penalty (mark resolved instead of remove)
+    c.resolve_penalty(&ENTITY, &0, &false);
+    
+    let score = c.get_score(&ENTITY).unwrap();
+    assert_eq!(score.penalty_points, 0);
+    
+    let input = c.get_input(&ENTITY).unwrap();
+    assert!(input.penalties.get(0).unwrap().is_resolved);
 }

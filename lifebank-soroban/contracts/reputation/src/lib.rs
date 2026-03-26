@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, vec, Env, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, Env, Vec};
 
 // ── Constants (all arithmetic is integer, scaled ×100 for two decimal places) ──
 
@@ -29,6 +29,35 @@ const MAX_FRAUD_PENALTY: i64 = 50_00;    // cap total fraud penalty
 const CONSISTENCY_LOW_STDDEV: i64 = 50;  // ×100 → 0.50 stars
 const CONSISTENCY_BONUS_HIGH: i64 = 10_00;
 const CONSISTENCY_BONUS_MED: i64 = 5_00;
+
+/// Penalty points per violation type
+const PENALTY_MINOR: i64 = 5_00;
+const PENALTY_MEDIUM: i64 = 15_00;
+const PENALTY_SERIOUS: i64 = 40_00;
+
+/// Recovery: penalties expire after 60 days
+const PENALTY_EXPIRY_SECS: u64 = 60 * 24 * 3600;
+
+
+/// Violation types for penalties
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViolationType {
+    Minor = 0,
+    Medium = 1,
+    Serious = 2,
+}
+
+/// A record of a penalty applied to an entity.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PenaltyRecord {
+    pub id: u32,
+    pub violation_type: ViolationType,
+    pub timestamp: u64,
+    pub is_resolved: bool,
+    pub is_appealed: bool,
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -60,6 +89,8 @@ pub struct ReputationInput {
     pub fraud_flags: u32,
     /// Unix timestamp of last activity
     pub last_active_at: u64,
+    /// History of applied penalties
+    pub penalties: Vec<PenaltyRecord>,
 }
 
 /// Full breakdown of the computed reputation score.
@@ -80,15 +111,19 @@ pub struct ReputationScore {
     pub fraud_penalty: i64,
     /// Decay applied ×100 (positive value, subtracted from score)
     pub decay_applied: i64,
+    /// Total active penalty points from violations ×100
+    pub penalty_points: i64,
 }
 
 #[contracterror]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum Error {
-    InvalidRating = 1,
-    InvalidInput = 2,
-    EntityNotFound = 3,
+    InvalidRating = 400,
+    InvalidInput = 401,
+    EntityNotFound = 402,
+    NotAuthorized = 403,
+    PenaltyNotFound = 404,
 }
 
 /// Storage key for persisted reputation scores.
@@ -97,6 +132,7 @@ pub enum Error {
 pub enum DataKey {
     Score(u64),   // entity_id → ReputationScore
     Input(u64),   // entity_id → ReputationInput
+    Admin,        // Address → Admin identity
 }
 
 // ── Contract ───────────────────────────────────────────────────────────────────
@@ -106,6 +142,14 @@ pub struct ReputationContract;
 
 #[contractimpl]
 impl ReputationContract {
+
+    /// Initialize the contract with an admin.
+    pub fn init(env: Env, admin: soroban_sdk::Address) {
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic!("already initialized");
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
+    }
 
     // ── Write ──────────────────────────────────────────────────────────────────
 
@@ -134,6 +178,7 @@ impl ReputationContract {
                 response_count: 0,
                 fraud_flags: 0,
                 last_active_at: timestamp,
+                penalties: Vec::new(&env),
             });
 
         // Append rating (score stored ×100)
@@ -175,6 +220,7 @@ impl ReputationContract {
                 response_count: 0,
                 fraud_flags: 0,
                 last_active_at: timestamp,
+                penalties: Vec::new(&env),
             });
 
         input.total_assigned += 1;
@@ -206,6 +252,104 @@ impl ReputationContract {
         input.last_active_at = timestamp;
         env.storage().persistent().set(&DataKey::Input(entity_id), &input);
 
+        Self::calculate_reputation(env, entity_id)
+    }
+
+    /// Apply a penalty for a violation. Can only be called by admin.
+    pub fn apply_penalty(
+        env: Env,
+        entity_id: u64,
+        violation: ViolationType,
+    ) -> Result<ReputationScore, Error> {
+        let admin: soroban_sdk::Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotAuthorized)?;
+        admin.require_auth();
+
+        let mut input: ReputationInput = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Input(entity_id))
+            .ok_or(Error::EntityNotFound)?;
+
+        let id = input.penalties.len();
+        input.penalties.push_back(PenaltyRecord {
+            id,
+            violation_type: violation,
+            timestamp: env.ledger().timestamp(),
+            is_resolved: false,
+            is_appealed: false,
+        });
+
+        env.storage().persistent().set(&DataKey::Input(entity_id), &input);
+
+        Self::calculate_reputation(env, entity_id)
+    }
+
+    /// File an appeal for a specific penalty.
+    pub fn appeal_penalty(
+        env: Env,
+        entity_id: u64,
+        penalty_id: u32,
+    ) -> Result<(), Error> {
+        let mut input: ReputationInput = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Input(entity_id))
+            .ok_or(Error::EntityNotFound)?;
+
+        let mut found = false;
+        for i in 0..input.penalties.len() {
+            let mut p = input.penalties.get(i).unwrap();
+            if p.id == penalty_id {
+                p.is_appealed = true;
+                input.penalties.set(i, p);
+                found = true;
+                break;
+            }
+        }
+
+        if !found {
+            return Err(Error::PenaltyNotFound);
+        }
+
+        env.storage().persistent().set(&DataKey::Input(entity_id), &input);
+        Ok(())
+    }
+
+    /// Resolve or dismiss a penalty (Admin only).
+    pub fn resolve_penalty(
+        env: Env,
+        entity_id: u64,
+        penalty_id: u32,
+        should_remove: bool,
+    ) -> Result<ReputationScore, Error> {
+        let admin: soroban_sdk::Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotAuthorized)?;
+        admin.require_auth();
+
+        let mut input: ReputationInput = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Input(entity_id))
+            .ok_or(Error::EntityNotFound)?;
+
+        let mut found_idx: Option<u32> = None;
+        for i in 0..input.penalties.len() {
+            if input.penalties.get(i).unwrap().id == penalty_id {
+                found_idx = Some(i);
+                break;
+            }
+        }
+
+        let idx = found_idx.ok_or(Error::PenaltyNotFound)?;
+        
+        if should_remove {
+            input.penalties.remove(idx);
+        } else {
+            let mut p = input.penalties.get(idx).unwrap();
+            p.is_resolved = true;
+            input.penalties.set(idx, p);
+        }
+
+        env.storage().persistent().set(&DataKey::Input(entity_id), &input);
         Self::calculate_reputation(env, entity_id)
     }
 
@@ -252,6 +396,9 @@ impl ReputationContract {
         // 5. Fraud penalty
         let fraud_penalty = Self::fraud_penalty(input.fraud_flags);
 
+        // 5b. Violation penalties (with recovery logic)
+        let penalty_points = Self::calculate_penalty_points(&input.penalties, now);
+
         // 6. Weighted sum of main components
         let raw = (rating_component * W_RATING
             + completion_component * W_COMPLETION
@@ -261,12 +408,12 @@ impl ReputationContract {
         // Add consistency bonus (already scaled)
         let with_bonus = raw + (consistency_bonus * W_CONSISTENCY / 100);
 
-        // Subtract fraud penalty
-        let after_fraud = (with_bonus - fraud_penalty).max(MIN_SCORE);
+        // Subtract fraud and violation penalties
+        let after_penalties = (with_bonus - fraud_penalty - penalty_points).max(MIN_SCORE);
 
         // 7. Decay for inactivity
         let decay_applied = Self::decay_penalty(input.last_active_at, now);
-        let final_score = (after_fraud - decay_applied).clamp(MIN_SCORE, MAX_SCORE);
+        let final_score = (after_penalties - decay_applied).clamp(MIN_SCORE, MAX_SCORE);
 
         let result = ReputationScore {
             score: final_score,
@@ -276,6 +423,7 @@ impl ReputationContract {
             consistency_bonus,
             fraud_penalty,
             decay_applied,
+            penalty_points,
         };
 
         env.storage()
@@ -425,6 +573,45 @@ impl ReputationContract {
             y = (x + n / x) / 2;
         }
         x
+    }
+
+    /// Calculate total active penalty points from violation history.
+    ///
+    /// Implements time-based recovery: penalties lose 50% weight after 30 days,
+    /// and expire completely after `PENALTY_EXPIRY_SECS` (60 days).
+    fn calculate_penalty_points(penalties: &Vec<PenaltyRecord>, now: u64) -> i64 {
+        let mut total: i64 = 0;
+        let recovery_threshold_secs: u64 = 30 * 24 * 3600; // 30 days
+
+        for i in 0..penalties.len() {
+            let p = penalties.get(i).unwrap();
+            if p.is_resolved {
+                continue;
+            }
+
+            let age = now.saturating_sub(p.timestamp);
+            if age >= PENALTY_EXPIRY_SECS {
+                continue;
+            }
+
+            let mut points = match p.violation_type {
+                ViolationType::Minor => PENALTY_MINOR,
+                ViolationType::Medium => PENALTY_MEDIUM,
+                ViolationType::Serious => PENALTY_SERIOUS,
+            };
+
+            // Time-based recovery: 50% reduction after 30 days
+            if age >= recovery_threshold_secs {
+                points /= 2;
+            }
+
+            // Appeals might reduce weight or suspend penalty? 
+            // For now, let's say appealed penalties still count but maybe less?
+            // Actually, let's keep it simple: they count full until resolved.
+            
+            total += points;
+        }
+        total
     }
 }
 

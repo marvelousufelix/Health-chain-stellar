@@ -51,10 +51,10 @@ pub struct PaymentPage {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum Error {
-    PaymentNotFound = 1,
-    InvalidAmount = 2,
-    SamePayerPayee = 3,
-    InvalidPage = 4,
+    PaymentNotFound = 500,
+    InvalidAmount = 501,
+    SamePayerPayee = 502,
+    InvalidPage = 503,
 }
 
 // ── Storage keys ───────────────────────────────────────────────────────────────
