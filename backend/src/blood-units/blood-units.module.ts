@@ -8,6 +8,7 @@ import { SorobanModule } from '../soroban/soroban.module';
 import { BloodUnitsController } from './blood-units.controller';
 import { BloodUnitsService } from './blood-units.service';
 import { BloodUnitEntity } from './entities/blood-unit.entity';
+import { BloodStatusStateMachine } from './state-machine/blood-status-state-machine';
 
 @Module({
   imports: [
@@ -16,7 +17,7 @@ import { BloodUnitEntity } from './entities/blood-unit.entity';
     NotificationsModule,
   ],
   controllers: [BloodUnitsController],
-  providers: [BloodUnitsService],
-  exports: [BloodUnitsService],
+  providers: [BloodUnitsService, BloodStatusStateMachine],
+  exports: [BloodUnitsService, BloodStatusStateMachine],
 })
 export class BloodUnitsModule {}
