@@ -34,16 +34,18 @@ describe('BloodStatus enum', () => {
     expect(statuses).toContain('IN_TRANSIT');
     expect(statuses).toContain('DELIVERED');
     expect(statuses).toContain('EXPIRED');
-    expect(statuses).toContain('QUARANTINED');
-    expect(statuses).toContain('DISCARDED');
-    expect(statuses).toContain('PROCESSING');
+    expect(statuses).toContain('COMPROMISED');
+    expect(statuses).toContain('DISPOSED');
   });
 
   it('should have correct enum values', () => {
     expect(BloodStatus.AVAILABLE).toBe('AVAILABLE');
     expect(BloodStatus.RESERVED).toBe('RESERVED');
     expect(BloodStatus.IN_TRANSIT).toBe('IN_TRANSIT');
+    expect(BloodStatus.DELIVERED).toBe('DELIVERED');
     expect(BloodStatus.EXPIRED).toBe('EXPIRED');
+    expect(BloodStatus.COMPROMISED).toBe('COMPROMISED');
+    expect(BloodStatus.DISPOSED).toBe('DISPOSED');
   });
 });
 
