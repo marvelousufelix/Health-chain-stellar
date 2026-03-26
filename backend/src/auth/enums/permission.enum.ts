@@ -47,6 +47,10 @@ export enum Permission {
   VIEW_NOTIFICATIONS = 'view:notifications',
   MANAGE_NOTIFICATIONS = 'manage:notifications',
 
+  // ── Location History ─────────────────────────────────────────────────
+  RECORD_LOCATION = 'record:location',
+  VIEW_LOCATION_HISTORY = 'view:location-history',
+
   // ── Maps ─────────────────────────────────────────────────────────────
   VIEW_MAPS = 'view:maps',
 
