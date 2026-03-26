@@ -1,6 +1,8 @@
 import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 
+import { CompensationModule } from '../common/compensation/compensation.module';
+
 import { BlockchainController } from './controllers/blockchain.controller';
 import { AdminGuard } from './guards/admin.guard';
 import { SorobanDlqProcessor } from './processors/soroban-dlq.processor';
@@ -10,6 +12,7 @@ import { SorobanService } from './services/soroban.service';
 
 @Module({
   imports: [
+    CompensationModule,
     BullModule.registerQueue(
       {
         name: 'soroban-tx-queue',

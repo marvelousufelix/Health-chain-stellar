@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from './app.module';
+import { AppErrorFilter } from './common/filters/irrecoverable-error.filter';
 import { ThrottlerExceptionFilter } from './throttler/throttler-exception.filter';
 
 async function bootstrap() {
@@ -14,7 +15,7 @@ async function bootstrap() {
     app.getHttpAdapter().getInstance().set('trust proxy', 1);
   }
 
-  app.useGlobalFilters(new ThrottlerExceptionFilter());
+  app.useGlobalFilters(new ThrottlerExceptionFilter(), new AppErrorFilter());
 
   // Global validation pipe
   app.useGlobalPipes(

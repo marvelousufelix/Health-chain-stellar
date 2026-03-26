@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { BlockchainModule } from '../blockchain/blockchain.module';
+import { CompensationModule } from '../common/compensation/compensation.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 
@@ -16,6 +17,7 @@ import { BloodRequestEntity } from './entities/blood-request.entity';
     InventoryModule,
     BlockchainModule,
     NotificationsModule,
+    CompensationModule,
   ],
   controllers: [BloodRequestsController],
   providers: [BloodRequestsService],

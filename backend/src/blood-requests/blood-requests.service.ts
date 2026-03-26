@@ -5,7 +5,6 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
-  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 
@@ -13,6 +12,11 @@ import { Repository } from 'typeorm';
 
 import { UserRole } from '../auth/enums/user-role.enum';
 import { SorobanService } from '../blockchain/services/soroban.service';
+import { CompensationService } from '../common/compensation/compensation.service';
+import {
+  BloodRequestIrrecoverableError,
+  CompensationAction,
+} from '../common/errors/app-errors';
 import { InventoryService } from '../inventory/inventory.service';
 import { EmailProvider } from '../notifications/providers/email.provider';
 
@@ -35,6 +39,7 @@ export class BloodRequestsService {
     private readonly inventoryService: InventoryService,
     private readonly sorobanService: SorobanService,
     private readonly emailProvider: EmailProvider,
+    private readonly compensationService: CompensationService,
   ) {}
 
   private assertHospitalAuthorization(
@@ -137,13 +142,70 @@ export class BloodRequestsService {
         });
         transactionHash = chainResult.transactionHash;
       } catch (err) {
-        this.logger.error(
+        // Blockchain failure is irrecoverable — inventory must be rolled back
+        const irrecoverableErr = new BloodRequestIrrecoverableError(
           `Soroban create_blood_request failed for ${requestNumber}`,
+          {
+            requestNumber,
+            hospitalId: dto.hospitalId,
+            reservedItems: reserved,
+          },
           err,
         );
-        throw new UnprocessableEntityException(
-          'Blood request could not be registered on-chain. Inventory reservations were rolled back.',
+
+        const releaseHandlers = reserved.map((r) => ({
+          action: CompensationAction.REVERT_INVENTORY,
+          execute: async () => {
+            await this.inventoryService.releaseStockByBankAndType(
+              r.bloodBankId,
+              r.bloodType,
+              r.quantity,
+            );
+            return true;
+          },
+        }));
+
+        const notifyHandler = {
+          action: CompensationAction.NOTIFY_USER,
+          execute: async () => {
+            try {
+              await this.emailProvider.send(
+                user.email,
+                `Blood request ${requestNumber} could not be processed`,
+                `<p>Your blood request <strong>${requestNumber}</strong> could not be registered on-chain and has been cancelled. Inventory reservations have been released. Please try again or contact support.</p>`,
+              );
+              return true;
+            } catch {
+              return false;
+            }
+          },
+        };
+
+        const adminAlertHandler = {
+          action: CompensationAction.NOTIFY_ADMIN,
+          execute: async () => {
+            this.logger.error(`[ADMIN ALERT] Blood request on-chain failure`, {
+              requestNumber,
+              hospitalId: dto.hospitalId,
+            });
+            return true;
+          },
+        };
+
+        const flagHandler = {
+          action: CompensationAction.FLAG_FOR_REVIEW,
+          execute: async () => true,
+        };
+
+        const result = await this.compensationService.compensate(
+          irrecoverableErr,
+          [...releaseHandlers, notifyHandler, adminAlertHandler, flagHandler],
+          `blood-request:${requestNumber}`,
         );
+
+        // Attach the failure record ID so the HTTP filter can surface it
+        irrecoverableErr.context['failureRecordId'] = result.failureRecordId;
+        throw irrecoverableErr;
       }
 
       const parent = this.bloodRequestRepo.create({
@@ -173,7 +235,12 @@ export class BloodRequestsService {
         data: saved,
       };
     } catch (err) {
-      await this.releaseReservations(reserved);
+      // Only release reservations if the irrecoverable handler hasn't already done so.
+      // BloodRequestIrrecoverableError carries REVERT_INVENTORY in its compensations,
+      // meaning the CompensationService already released stock above.
+      if (!(err instanceof BloodRequestIrrecoverableError)) {
+        await this.releaseReservations(reserved);
+      }
       throw err;
     }
   }
