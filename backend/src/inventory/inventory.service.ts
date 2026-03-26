@@ -7,6 +7,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 
 import { Repository } from 'typeorm';
 
+import {
+  ReservedUnitInvariantService,
+  UnitReservationCheck,
+} from '../common/invariants/reserved-unit.invariant';
 import { InventoryStockEntity } from './entities/inventory-stock.entity';
 
 @Injectable()
@@ -14,6 +18,7 @@ export class InventoryService {
   constructor(
     @InjectRepository(InventoryStockEntity)
     private readonly inventoryRepo: Repository<InventoryStockEntity>,
+    private readonly unitInvariant: ReservedUnitInvariantService,
   ) {}
 
   async findAll(hospitalId?: string) {
