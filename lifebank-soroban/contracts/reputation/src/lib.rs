@@ -119,11 +119,11 @@ pub struct ReputationScore {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum Error {
-    InvalidRating = 1,
-    InvalidInput = 2,
-    EntityNotFound = 3,
-    NotAuthorized = 4,
-    PenaltyNotFound = 5,
+    InvalidRating = 400,
+    InvalidInput = 401,
+    EntityNotFound = 402,
+    NotAuthorized = 403,
+    PenaltyNotFound = 404,
 }
 
 /// Storage key for persisted reputation scores.
