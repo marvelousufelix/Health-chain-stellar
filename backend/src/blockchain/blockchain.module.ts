@@ -9,6 +9,7 @@ import { AdminGuard } from './guards/admin.guard';
 import { JobDeduplicationPlugin } from './plugins/job-deduplication.plugin';
 import { SorobanDlqProcessor } from './processors/soroban-dlq.processor';
 import { SorobanTxProcessor } from './processors/soroban-tx.processor';
+import { ConfirmationService } from './services/confirmation.service';
 import { IdempotencyService } from './services/idempotency.service';
 import { QueueMetricsService } from './services/queue-metrics.service';
 import { SorobanService } from './services/soroban.service';
@@ -50,6 +51,7 @@ import { SorobanService } from './services/soroban.service';
   ],
   providers: [
     SorobanService,
+    ConfirmationService,
     IdempotencyService,
     JobDeduplicationPlugin,
     SorobanTxProcessor,

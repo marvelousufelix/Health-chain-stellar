@@ -9,6 +9,7 @@ import {
   QueueMetrics,
 } from '../types/soroban-tx.types';
 
+import { ConfirmationService } from './confirmation.service';
 import { IdempotencyService } from './idempotency.service';
 
 import type { Queue } from 'bull';
@@ -25,6 +26,7 @@ export class SorobanService {
     @InjectQueue('soroban-dlq') private dlq: Queue,
     private idempotencyService: IdempotencyService,
     private deduplicationPlugin: JobDeduplicationPlugin,
+    private confirmationService: ConfirmationService,
   ) {}
 
   /**
@@ -179,7 +181,8 @@ export class SorobanService {
 
   /**
    * Process an incoming blockchain callback via webhook.
-   * Ensures callback data is securely handled and logged.
+   * Tracks confirmation depth and transitions to "final" only once
+   * the configured SOROBAN_CONFIRMATION_DEPTH threshold is reached.
    *
    * @param callback - Verified callback payload
    */
@@ -190,6 +193,7 @@ export class SorobanService {
     status: 'pending' | 'confirmed' | 'failed';
     timestamp: string;
     details?: string;
+    confirmations?: number;
   }): Promise<void> {
     this.logger.log(
       `Processing blockchain callback event ${callback.eventId}`,
@@ -201,8 +205,22 @@ export class SorobanService {
       },
     );
 
-    // TODO: map callback to persistent state or queue side effects.
-    // e.g., persist to database, update workflow state, or publish domain events.
+    if (callback.status === 'confirmed') {
+      const state = await this.confirmationService.recordConfirmations(
+        callback.transactionHash,
+        callback.confirmations ?? 1,
+      );
+
+      this.logger.log(
+        `Finality check: tx=${callback.transactionHash} confirmations=${state.confirmations}/${state.finalityThreshold} status=${state.status}`,
+        { eventId: callback.eventId },
+      );
+
+      // TODO: persist state.status ('confirmed' | 'final') to database /
+      //       publish domain event so downstream workflows can react.
+    }
+
+    // TODO: handle 'pending' and 'failed' status transitions.
 
     await Promise.resolve();
   }
