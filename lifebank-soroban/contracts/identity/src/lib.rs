@@ -4,6 +4,17 @@ use soroban_sdk::{
     String, Vec,
 };
 
+// ── Storage TTL constants ─────────────────────────────────────────────────────
+/// Threshold below which instance storage is extended (≈ 30 days).
+const INSTANCE_BUMP_THRESHOLD: u32 = 518_400;
+/// Target TTL for instance storage after bump (≈ 1 year).
+const INSTANCE_BUMP_AMOUNT: u32 = 6_307_200;
+
+/// Threshold below which persistent entries are extended (≈ 30 days).
+const PERSISTENT_BUMP_THRESHOLD: u32 = 518_400;
+/// Target TTL for persistent entries after bump (≈ 1 year).
+const PERSISTENT_BUMP_AMOUNT: u32 = 6_307_200;
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -166,6 +177,9 @@ impl IdentityContract {
 
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::OrgCounter, &0u32);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
         Self::grant_role(env.clone(), admin.clone(), Role::Admin);
 
         env.events()
@@ -175,10 +189,12 @@ impl IdentityContract {
     }
 
     pub fn is_initialized(env: Env) -> bool {
+        Self::bump_instance(&env);
         env.storage().instance().has(&DataKey::Admin)
     }
 
     pub fn get_admin(env: Env) -> Result<Address, Error> {
+        Self::bump_instance(&env);
         env.storage()
             .instance()
             .get(&DataKey::Admin)
@@ -236,6 +252,17 @@ impl IdentityContract {
             .persistent()
             .set(&DataKey::Docs(org_id.clone()), &document_hashes);
 
+        // Extend TTL for newly registered org data (persistent — must not expire)
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Org(org_id.clone()), PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+        env.storage()
+            .persistent()
+            .extend_ttl(&license_key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Docs(org_id.clone()), PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+
         // Assign role
         let role = match org_type.clone() {
             OrgType::BloodBank => Role::BloodBank,
@@ -252,6 +279,9 @@ impl IdentityContract {
             .unwrap_or(Vec::new(&env));
         list.push_back(org_id.clone());
         env.storage().persistent().set(&type_key, &list);
+        env.storage()
+            .persistent()
+            .extend_ttl(&type_key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         Self::increment_counter(&env, DataKey::OrgCounter);
 
@@ -271,7 +301,10 @@ impl IdentityContract {
     pub fn grant_role(env: Env, address: Address, role: Role) {
         env.storage()
             .persistent()
-            .set(&DataKey::Role(address), &role);
+            .set(&DataKey::Role(address.clone()), &role);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Role(address), PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
     }
 
     /// Get the role of an address
@@ -446,6 +479,17 @@ impl IdentityContract {
             .persistent()
             .set(&DataKey::RatingRecord(request_id, rater.clone()), &record);
 
+        // Extend TTL for updated org and rating data
+        env.storage()
+            .persistent()
+            .extend_ttl(&org_key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+        env.storage()
+            .persistent()
+            .extend_ttl(&rated_key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::RatingRecord(request_id, rater.clone()), PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+
         env.events().publish(
             (symbol_short!("rated"),),
             (org_id, rater, rating),
@@ -527,6 +571,9 @@ impl IdentityContract {
         };
         badges.push_back(record);
         env.storage().persistent().set(&badges_key, &badges);
+        env.storage()
+            .persistent()
+            .extend_ttl(&badges_key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         env.events().publish(
             (symbol_short!("badge"),),
@@ -577,6 +624,9 @@ impl IdentityContract {
         }
 
         env.storage().persistent().set(&badges_key, &new_badges);
+        env.storage()
+            .persistent()
+            .extend_ttl(&badges_key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         Ok(())
     }
 
@@ -629,6 +679,9 @@ impl IdentityContract {
         env.storage()
             .persistent()
             .set(&DataKey::Delivery(request_id), &proof);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Delivery(request_id), PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         env.events().publish(
             (symbol_short!("delivery"),),
@@ -655,6 +708,13 @@ impl IdentityContract {
         env.storage().instance().set(&key, &count);
         count
     }
+
+    /// Extend instance storage TTL so config/counter entries don't expire.
+    fn bump_instance(env: &Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+    }
 }
 
 #[contract]
@@ -668,6 +728,9 @@ impl AccessControlContract {
             panic!("Already initialized");
         }
         env.storage().persistent().set(&DataKey::Admin, &admin);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Admin, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
     }
 
     /// Grant a role to an address with optional expiry
@@ -699,6 +762,9 @@ impl AccessControlContract {
         roles = Self::insert_sorted(&env, roles, new_grant);
 
         env.storage().persistent().set(&key, &roles);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
     }
 
     /// Revoke a role from an address

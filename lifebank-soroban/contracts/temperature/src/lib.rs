@@ -23,6 +23,7 @@ impl TemperatureContract {
         }
 
         storage::set_admin(&env, &admin);
+        storage::bump_instance(&env);
         Ok(())
     }
 
@@ -82,11 +83,17 @@ impl TemperatureContract {
         };
         
         env.storage().persistent().set(&streak_key, &new_streak);
+        env.storage()
+            .persistent()
+            .extend_ttl(&streak_key, 518_400, 6_307_200);
         
         // Check if unit should be compromised (3 consecutive violations)
         if new_streak >= 3 {
             let compromised_key = DataKey::IsCompromised(unit_id);
             env.storage().persistent().set(&compromised_key, &true);
+            env.storage()
+                .persistent()
+                .extend_ttl(&compromised_key, 518_400, 6_307_200);
         }
 
         let mut page_num: u32 = 0;
@@ -295,7 +302,13 @@ impl TemperatureContract {
         let compromised_key = DataKey::IsCompromised(unit_id);
 
         env.storage().persistent().set(&streak_key, &0u32);
+        env.storage()
+            .persistent()
+            .extend_ttl(&streak_key, 518_400, 6_307_200);
         env.storage().persistent().set(&compromised_key, &false);
+        env.storage()
+            .persistent()
+            .extend_ttl(&compromised_key, 518_400, 6_307_200);
 
         Ok(())
     }

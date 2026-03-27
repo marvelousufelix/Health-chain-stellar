@@ -15,6 +15,20 @@ mod test_payments;
 #[cfg(test)]
 mod test_storage_layout;
 
+// ── Storage TTL constants ─────────────────────────────────────────────────────
+// Soroban charges rent on stored entries. We extend TTLs proactively to prevent
+// unexpected expiry. Ledger close time ≈ 5 seconds.
+
+/// Threshold below which instance storage is extended (≈ 30 days).
+pub(crate) const INSTANCE_BUMP_THRESHOLD: u32 = 518_400;
+/// Target TTL for instance storage after bump (≈ 1 year).
+pub(crate) const INSTANCE_BUMP_AMOUNT: u32 = 6_307_200;
+
+/// Threshold below which persistent entries are extended (≈ 30 days).
+pub(crate) const PERSISTENT_BUMP_THRESHOLD: u32 = 518_400;
+/// Target TTL for persistent entries after bump (≈ 1 year).
+pub(crate) const PERSISTENT_BUMP_AMOUNT: u32 = 6_307_200;
+
 /// Error types for blood registration and transfer
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -403,6 +417,9 @@ impl HealthChainContract {
     pub fn initialize(env: Env, admin: Address) -> Symbol {
         admin.require_auth();
         env.storage().instance().set(&ADMIN, &admin);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
         symbol_short!("init")
     }
 
@@ -414,6 +431,7 @@ impl HealthChainContract {
             .get(&ADMIN)
             .ok_or(Error::Unauthorized)?;
         admin.require_auth();
+        Self::bump_instance(&env);
 
         let mut banks: Map<Address, bool> = env
             .storage()
@@ -423,6 +441,9 @@ impl HealthChainContract {
 
         banks.set(bank_id.clone(), true);
         env.storage().persistent().set(&BLOOD_BANKS, &banks);
+        env.storage()
+            .persistent()
+            .extend_ttl(&BLOOD_BANKS, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         Ok(())
     }
@@ -435,6 +456,7 @@ impl HealthChainContract {
             .get(&ADMIN)
             .ok_or(Error::Unauthorized)?;
         admin.require_auth();
+        Self::bump_instance(&env);
 
         let mut hospitals: Map<Address, bool> = env
             .storage()
@@ -444,6 +466,9 @@ impl HealthChainContract {
 
         hospitals.set(hospital_id.clone(), true);
         env.storage().persistent().set(&HOSPITALS, &hospitals);
+        env.storage()
+            .persistent()
+            .extend_ttl(&HOSPITALS, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         Ok(())
     }
@@ -541,7 +566,7 @@ impl HealthChainContract {
         unit.allocation_timestamp = Some(current_time);
 
         units.set(unit_id, unit.clone());
-        env.storage().persistent().set(&BLOOD_UNITS, &units);
+        save_blood_units(&env, &units);
 
         record_status_change(
             &env,
@@ -636,7 +661,7 @@ impl HealthChainContract {
         }
 
         // Save all changes
-        env.storage().persistent().set(&BLOOD_UNITS, &units);
+        save_blood_units(&env, &units);
 
         Ok(allocated)
     }
@@ -672,7 +697,7 @@ impl HealthChainContract {
         unit.allocation_timestamp = None;
 
         units.set(unit_id, unit.clone());
-        env.storage().persistent().set(&BLOOD_UNITS, &units);
+        save_blood_units(&env, &units);
 
         // Record status change
         record_status_change(
@@ -761,7 +786,7 @@ impl HealthChainContract {
         unit.transfer_timestamp = Some(current_time);
 
         units.set(unit_id, unit.clone());
-        env.storage().persistent().set(&BLOOD_UNITS, &units);
+        save_blood_units(&env, &units);
 
         record_status_change(
             &env,
@@ -872,7 +897,7 @@ impl HealthChainContract {
         if unit.expiration_date <= current_time {
             unit.status = BloodStatus::Expired;
             units.set(unit_id, unit.clone());
-            env.storage().persistent().set(&BLOOD_UNITS, &units);
+            save_blood_units(&env, &units);
 
             custody_event.status = CustodyStatus::Cancelled;
             custody_events.set(event_id, custody_event);
@@ -905,7 +930,7 @@ impl HealthChainContract {
         unit.delivery_timestamp = Some(current_time);
 
         units.set(unit_id, unit.clone());
-        env.storage().persistent().set(&BLOOD_UNITS, &units);
+        save_blood_units(&env, &units);
 
         // Record status change
         record_status_change(
@@ -998,7 +1023,7 @@ impl HealthChainContract {
         unit.transfer_timestamp = None;
 
         units.set(unit_id, unit.clone());
-        env.storage().persistent().set(&BLOOD_UNITS, &units);
+        save_blood_units(&env, &units);
 
         // Record status change
         record_status_change(
@@ -1055,7 +1080,7 @@ impl HealthChainContract {
         unit.status = BloodStatus::Discarded;
 
         units.set(unit_id, unit.clone());
-        env.storage().persistent().set(&BLOOD_UNITS, &units);
+        save_blood_units(&env, &units);
 
         // Record status change
         record_status_change(
@@ -1153,13 +1178,42 @@ impl HealthChainContract {
 
         results
     }
+
+    // ── Internal helpers ───────────────────────────────────────────────────────
+
+    /// Extend instance storage TTL so admin/config entries don't expire.
+    /// Call this in every frequently-accessed function.
+    fn bump_instance(env: &Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+    }
 }
 
 // ── SHARED HELPERS (Internal) ──
 
+/// Persist the blood units map and extend its TTL.
+pub(crate) fn save_blood_units(env: &Env, units: &Map<u64, BloodUnit>) {
+    env.storage().persistent().set(&BLOOD_UNITS, units);
+    env.storage()
+        .persistent()
+        .extend_ttl(&BLOOD_UNITS, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+}
+
+/// Persist the custody events map and extend its TTL.
+pub(crate) fn save_custody_events(env: &Env, events: &Map<String, CustodyEvent>) {
+    env.storage().persistent().set(&CUSTODY_EVENTS, events);
+    env.storage()
+        .persistent()
+        .extend_ttl(&CUSTODY_EVENTS, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+}
+
 pub(crate) fn get_next_id(env: &Env) -> u64 {
     let id: u64 = env.storage().persistent().get(&NEXT_ID).unwrap_or(1);
     env.storage().persistent().set(&NEXT_ID, &(id + 1));
+    env.storage()
+        .persistent()
+        .extend_ttl(&NEXT_ID, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
     id
 }
 
@@ -1170,6 +1224,9 @@ pub(crate) fn get_next_request_id(env: &Env) -> u64 {
         .get(&NEXT_REQUEST_ID)
         .unwrap_or(1);
     env.storage().persistent().set(&NEXT_REQUEST_ID, &(id + 1));
+    env.storage()
+        .persistent()
+        .extend_ttl(&NEXT_REQUEST_ID, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
     id
 }
 
@@ -1197,6 +1254,9 @@ pub(crate) fn record_status_change(
 
     history.push_back(event.clone());
     env.storage().persistent().set(&history_key, &history);
+    env.storage()
+        .persistent()
+        .extend_ttl(&history_key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
     // Also emit event
     env.events()
@@ -1253,6 +1313,9 @@ pub(crate) fn append_to_custody_trail(env: &Env, unit_id: u64, event_id: String)
 
     // Save the page
     env.storage().persistent().set(&page_key, &page);
+    env.storage()
+        .persistent()
+        .extend_ttl(&page_key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
     // Update metadata
     metadata.total_events += 1;
@@ -1262,6 +1325,9 @@ pub(crate) fn append_to_custody_trail(env: &Env, unit_id: u64, event_id: String)
     }
 
     env.storage().persistent().set(&meta_key, &metadata);
+    env.storage()
+        .persistent()
+        .extend_ttl(&meta_key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 }
 
 #[contractimpl]
@@ -1900,7 +1966,7 @@ impl HealthChainContract {
             );
         }
 
-        env.storage().persistent().set(&BLOOD_UNITS, &units);
+        save_blood_units(&env, &units);
 
         let old_status = request.status;
         request.reserved_unit_ids = unit_ids.clone();
@@ -1989,7 +2055,7 @@ impl HealthChainContract {
             }
         }
 
-        env.storage().persistent().set(&BLOOD_UNITS, &units);
+        save_blood_units(&env, &units);
         request.reserved_unit_ids = vec![&env];
 
         requests.set(request_id, request);
@@ -2078,7 +2144,7 @@ impl HealthChainContract {
             );
         }
 
-        env.storage().persistent().set(&BLOOD_UNITS, &units);
+        save_blood_units(&env, &units);
 
         // Update request
         let old_status = request.status;
@@ -2281,7 +2347,7 @@ impl HealthChainContract {
             .unwrap_or(Map::new(&env));
 
         units.set(id, unit);
-        env.storage().persistent().set(&BLOOD_UNITS, &units);
+        save_blood_units(&env, &units);
 
         id
     }

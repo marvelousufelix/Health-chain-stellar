@@ -7,6 +7,24 @@ pub const SECONDS_PER_DAY: u64 = 86400;
 /// Used to compute expiration_timestamp from ledger time at registration.
 pub const BLOOD_SHELF_LIFE_DAYS: u64 = 35;
 
+// ── Storage TTL constants ─────────────────────────────────────────────────────
+/// Threshold below which instance storage is extended (≈ 30 days).
+pub const INSTANCE_BUMP_THRESHOLD: u32 = 518_400;
+/// Target TTL for instance storage after bump (≈ 1 year).
+pub const INSTANCE_BUMP_AMOUNT: u32 = 6_307_200;
+
+/// Threshold below which persistent entries are extended (≈ 30 days).
+pub const PERSISTENT_BUMP_THRESHOLD: u32 = 518_400;
+/// Target TTL for persistent entries after bump (≈ 1 year).
+pub const PERSISTENT_BUMP_AMOUNT: u32 = 6_307_200;
+
+/// Extend instance storage TTL. Call in frequently-accessed functions.
+pub fn bump_instance(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+}
+
 /// Get the admin address
 pub fn get_admin(env: &Env) -> Address {
     env.storage()
@@ -18,6 +36,9 @@ pub fn get_admin(env: &Env) -> Address {
 /// Set the admin address
 pub fn set_admin(env: &Env, admin: &Address) {
     env.storage().instance().set(&DataKey::Admin, admin);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 }
 
 /// Check if an address is authorized as a blood bank
@@ -41,6 +62,10 @@ pub fn increment_blood_unit_id(env: &Env) -> u64 {
     env.storage()
         .instance()
         .set(&DataKey::BloodUnitCounter, &next_id);
+    // Bump instance TTL whenever the counter is updated
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
     next_id
 }
 
@@ -49,6 +74,9 @@ pub fn set_blood_unit(env: &Env, blood_unit: &BloodUnit) {
     env.storage()
         .persistent()
         .set(&DataKey::BloodUnit(blood_unit.id), blood_unit);
+    env.storage()
+        .persistent()
+        .extend_ttl(&DataKey::BloodUnit(blood_unit.id), PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 }
 
 /// Get a blood unit by ID
@@ -72,6 +100,9 @@ pub fn add_to_blood_type_index(env: &Env, blood_unit: &BloodUnit) {
 
     units.push_back(blood_unit.id);
     env.storage().persistent().set(&key, &units);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 }
 
 /// Add blood unit to bank index
@@ -85,6 +116,9 @@ pub fn add_to_bank_index(env: &Env, blood_unit: &BloodUnit) {
 
     units.push_back(blood_unit.id);
     env.storage().persistent().set(&key, &units);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 }
 
 /// Add blood unit to status index
@@ -98,6 +132,9 @@ pub fn add_to_status_index(env: &Env, blood_unit: &BloodUnit) {
 
     units.push_back(blood_unit.id);
     env.storage().persistent().set(&key, &units);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 }
 
 /// Remove a blood unit ID from the status index bucket for `old_status`.
@@ -122,6 +159,9 @@ pub fn remove_from_status_index(env: &Env, blood_unit_id: u64, old_status: Blood
         }
     }
     env.storage().persistent().set(&key, &updated);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 }
 
 /// Add blood unit to donor index (if donor_id exists)
@@ -136,6 +176,9 @@ pub fn add_to_donor_index(env: &Env, blood_unit: &BloodUnit) {
 
         units.push_back(blood_unit.id);
         env.storage().persistent().set(&key, &units);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
     }
 }
 
@@ -171,11 +214,17 @@ pub fn record_status_change(
 
     histories.push_back(history);
     env.storage().persistent().set(&key, &histories);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
     // Increment change count for this unit
     let count_key = DataKey::BloodUnitStatusChangeCount(blood_unit_id);
     let count = get_blood_unit_status_change_count(env, blood_unit_id);
     env.storage().persistent().set(&count_key, &(count + 1));
+    env.storage()
+        .persistent()
+        .extend_ttl(&count_key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 }
 
 /// Get status change history for a blood unit
@@ -199,5 +248,8 @@ fn increment_status_history_counter(env: &Env) -> u64 {
     let current = env.storage().instance().get(&key).unwrap_or(0u64);
     let next_id = current + 1;
     env.storage().instance().set(&key, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
     next_id
 }

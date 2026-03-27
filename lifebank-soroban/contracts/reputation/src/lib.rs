@@ -3,6 +3,17 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Vec,
 };
 
+// ── Storage TTL constants ─────────────────────────────────────────────────────
+/// Threshold below which instance storage is extended (≈ 30 days).
+const INSTANCE_BUMP_THRESHOLD: u32 = 518_400;
+/// Target TTL for instance storage after bump (≈ 1 year).
+const INSTANCE_BUMP_AMOUNT: u32 = 6_307_200;
+
+/// Threshold below which persistent entries are extended (≈ 30 days).
+const PERSISTENT_BUMP_THRESHOLD: u32 = 518_400;
+/// Target TTL for persistent entries after bump (≈ 1 year).
+const PERSISTENT_BUMP_AMOUNT: u32 = 6_307_200;
+
 // ── Constants (all arithmetic is integer, scaled ×100 for two decimal places) ──
 
 /// Maximum raw score before clamping to 100_00 (100.00)
@@ -214,6 +225,9 @@ impl ReputationContract {
                 min_interactions_for_badge: DEFAULT_BADGE_MIN_INTERACTIONS,
             },
         );
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 
         env.events().publish((symbol_short!("init"),), admin);
 
@@ -226,10 +240,12 @@ impl ReputationContract {
     }
 
     pub fn is_initialized(env: Env) -> bool {
+        Self::bump_instance(&env);
         env.storage().instance().has(&DataKey::Admin)
     }
 
     pub fn get_admin(env: Env) -> Result<Address, Error> {
+        Self::bump_instance(&env);
         env.storage()
             .instance()
             .get(&DataKey::Admin)
@@ -237,6 +253,7 @@ impl ReputationContract {
     }
 
     pub fn get_rating_scale_config(env: Env) -> Result<RatingScaleConfig, Error> {
+        Self::bump_instance(&env);
         env.storage()
             .instance()
             .get(&DataKey::RatingScaleConfig)
@@ -244,6 +261,7 @@ impl ReputationContract {
     }
 
     pub fn get_decay_config(env: Env) -> Result<DecayConfig, Error> {
+        Self::bump_instance(&env);
         env.storage()
             .instance()
             .get(&DataKey::DecayConfig)
@@ -251,6 +269,7 @@ impl ReputationContract {
     }
 
     pub fn get_minimum_interactions(env: Env) -> Result<u32, Error> {
+        Self::bump_instance(&env);
         env.storage()
             .instance()
             .get(&DataKey::MinimumInteractions)
@@ -258,6 +277,7 @@ impl ReputationContract {
     }
 
     pub fn get_badge_config(env: Env) -> Result<BadgeConfig, Error> {
+        Self::bump_instance(&env);
         env.storage()
             .instance()
             .get(&DataKey::BadgeConfig)
@@ -308,6 +328,9 @@ impl ReputationContract {
         input.last_active_at = timestamp;
 
         env.storage().persistent().set(&DataKey::Input(entity_id), &input);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Input(entity_id), PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         let result = Self::calculate_reputation(env.clone(), entity_id)?;
         Ok(result)
@@ -345,6 +368,9 @@ impl ReputationContract {
         input.last_active_at = timestamp;
 
         env.storage().persistent().set(&DataKey::Input(entity_id), &input);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Input(entity_id), PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         Self::calculate_reputation(env, entity_id)
     }
@@ -364,6 +390,9 @@ impl ReputationContract {
         input.fraud_flags += 1;
         input.last_active_at = timestamp;
         env.storage().persistent().set(&DataKey::Input(entity_id), &input);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Input(entity_id), PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         Self::calculate_reputation(env, entity_id)
     }
@@ -393,6 +422,9 @@ impl ReputationContract {
         });
 
         env.storage().persistent().set(&DataKey::Input(entity_id), &input);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Input(entity_id), PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         Self::calculate_reputation(env, entity_id)
     }
@@ -425,6 +457,9 @@ impl ReputationContract {
         }
 
         env.storage().persistent().set(&DataKey::Input(entity_id), &input);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Input(entity_id), PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         Ok(())
     }
 
@@ -463,6 +498,9 @@ impl ReputationContract {
         }
 
         env.storage().persistent().set(&DataKey::Input(entity_id), &input);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Input(entity_id), PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
         Self::calculate_reputation(env, entity_id)
     }
 
@@ -542,6 +580,9 @@ impl ReputationContract {
         env.storage()
             .persistent()
             .set(&DataKey::Score(entity_id), &result);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Score(entity_id), PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 
         env.events().publish(
             (symbol_short!("rep"), symbol_short!("updated")),
@@ -564,6 +605,13 @@ impl ReputationContract {
     }
 
     // ── Algorithm helpers (pure, no storage) ──────────────────────────────────
+
+    /// Extend instance storage TTL so config entries don't expire.
+    fn bump_instance(env: &Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+}
 
     /// Recency-weighted average rating, normalised to 0–100_00.
     ///

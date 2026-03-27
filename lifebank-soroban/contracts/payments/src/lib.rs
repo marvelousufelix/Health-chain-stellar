@@ -1,6 +1,17 @@
 #![no_std]
 use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, vec, Address, Env, Vec};
 
+// ── Storage TTL constants ─────────────────────────────────────────────────────
+/// Threshold below which instance storage is extended (≈ 30 days).
+const INSTANCE_BUMP_THRESHOLD: u32 = 518_400;
+/// Target TTL for instance storage after bump (≈ 1 year).
+const INSTANCE_BUMP_AMOUNT: u32 = 6_307_200;
+
+/// Threshold below which persistent entries are extended (≈ 30 days).
+const PERSISTENT_BUMP_THRESHOLD: u32 = 518_400;
+/// Target TTL for persistent entries after bump (≈ 1 year).
+const PERSISTENT_BUMP_AMOUNT: u32 = 6_307_200;
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -68,16 +79,25 @@ fn payment_key(id: u64) -> (u64, &'static str) {
 }
 
 fn get_counter(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
     env.storage().instance().get(&PAYMENT_COUNTER).unwrap_or(0u64)
 }
 
 fn set_counter(env: &Env, val: u64) {
     env.storage().instance().set(&PAYMENT_COUNTER, &val);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 }
 
 fn store_payment(env: &Env, payment: &Payment) {
     let key = payment_key(payment.id);
     env.storage().persistent().set(&key, payment);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
 }
 
 fn load_payment(env: &Env, id: u64) -> Option<Payment> {

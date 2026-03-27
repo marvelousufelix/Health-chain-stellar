@@ -33,6 +33,7 @@ impl InventoryContract {
 
         // Set admin
         storage::set_admin(&env, &admin);
+        storage::bump_instance(&env);
 
         Ok(())
     }

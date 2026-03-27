@@ -4,6 +4,20 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env,
 };
 
+// ── Storage TTL constants ─────────────────────────────────────────────────────
+// Soroban charges rent on stored entries. We extend TTLs proactively to prevent
+// unexpected expiry. Ledger close time ≈ 5 seconds.
+
+/// Threshold below which instance storage is extended (≈ 30 days).
+const INSTANCE_BUMP_THRESHOLD: u32 = 518_400;
+/// Target TTL for instance storage after bump (≈ 1 year).
+const INSTANCE_BUMP_AMOUNT: u32 = 6_307_200;
+
+/// Threshold below which persistent entries are extended (≈ 30 days).
+const PERSISTENT_BUMP_THRESHOLD: u32 = 518_400;
+/// Target TTL for persistent entries after bump (≈ 1 year).
+const PERSISTENT_BUMP_AMOUNT: u32 = 6_307_200;
+
 const DEFAULT_MIN_TEMPERATURE_C: i32 = 2;
 const DEFAULT_MAX_TEMPERATURE_C: i32 = 6;
 
@@ -81,10 +95,12 @@ impl DeliveryContract {
     }
 
     pub fn is_initialized(env: Env) -> bool {
+        Self::bump_instance(&env);
         env.storage().instance().has(&DataKey::Admin)
     }
 
     pub fn get_admin(env: Env) -> Result<Address, Error> {
+        Self::bump_instance(&env);
         env.storage()
             .instance()
             .get(&DataKey::Admin)
@@ -92,6 +108,7 @@ impl DeliveryContract {
     }
 
     pub fn get_request_contract(env: Env) -> Result<Address, Error> {
+        Self::bump_instance(&env);
         env.storage()
             .instance()
             .get(&DataKey::RequestContract)
@@ -99,6 +116,7 @@ impl DeliveryContract {
     }
 
     pub fn get_delivery_counter(env: Env) -> Result<u64, Error> {
+        Self::bump_instance(&env);
         env.storage()
             .instance()
             .get(&DataKey::DeliveryCounter)
@@ -106,6 +124,7 @@ impl DeliveryContract {
     }
 
     pub fn get_temperature_thresholds(env: Env) -> Result<TemperatureThresholds, Error> {
+        Self::bump_instance(&env);
         env.storage()
             .instance()
             .get(&DataKey::TemperatureThresholds)
@@ -113,10 +132,21 @@ impl DeliveryContract {
     }
 
     pub fn get_proof_requirements(env: Env) -> Result<ProofRequirements, Error> {
+        Self::bump_instance(&env);
         env.storage()
             .instance()
             .get(&DataKey::ProofRequirements)
             .ok_or(Error::NotInitialized)
+    }
+
+    // ── Internal helpers ───────────────────────────────────────────────────────
+
+    /// Extend instance storage TTL so config entries don't expire.
+    /// Call this in every frequently-accessed function.
+    fn bump_instance(env: &Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
     }
 }
 
