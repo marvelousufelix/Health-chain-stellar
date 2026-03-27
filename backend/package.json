@@ -21,7 +21,8 @@
     "test:contracts": "jest --testPathPatterns='__contracts__' --detectOpenHandles --forceExit",
     "test:contracts:watch": "jest --testPathPatterns='__contracts__' --watch",
     "test:contracts:cov": "jest --testPathPatterns='__contracts__' --coverage --detectOpenHandles --forceExit",
-    "prepare": "cd .. && husky backend/.husky"
+    "prepare": "cd .. && husky backend/.husky",
+    "seed": "ts-node -r tsconfig-paths/register src/scripts/seed.ts"
   },
   "dependencies": {
     "@nest-lab/throttler-storage-redis": "^1.2.0",
