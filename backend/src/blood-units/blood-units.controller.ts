@@ -19,6 +19,8 @@ import { Permission } from '../auth/enums/permission.enum';
 
 import { BloodStatusService } from './blood-status.service';
 import { BloodUnitsService } from './blood-units.service';
+import { QrVerificationService } from './qr-verification.service';
+import { VerifyQrDto } from './dto/verify-qr.dto';
 import {
   BulkRegisterBloodUnitsDto,
   RegisterBloodUnitDto,
@@ -36,6 +38,7 @@ export class BloodUnitsController {
   constructor(
     private readonly bloodUnitsService: BloodUnitsService,
     private readonly bloodStatusService: BloodStatusService,
+    private readonly qrVerificationService: QrVerificationService,
   ) {}
 
   @RequirePermissions(Permission.REGISTER_BLOOD_UNIT)
@@ -129,5 +132,18 @@ export class BloodUnitsController {
     request: Request & { user?: { id: string; role: string } },
   ) {
     return this.bloodStatusService.bulkUpdateStatus(dto, request.user);
+  }
+
+  @RequirePermissions(Permission.UPDATE_BLOOD_STATUS)
+  @Post('verify-qr')
+  @HttpCode(HttpStatus.OK)
+  async verifyQr(@Body() dto: VerifyQrDto) {
+    return this.qrVerificationService.verify(dto);
+  }
+
+  @RequirePermissions(Permission.VIEW_BLOOD_STATUS_HISTORY)
+  @Get('verify-qr/history/:orderId')
+  async getVerificationHistory(@Param('orderId', ParseUUIDPipe) orderId: string) {
+    return this.qrVerificationService.getVerificationHistory(orderId);
   }
 }

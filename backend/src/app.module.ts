@@ -18,6 +18,7 @@ import { BloodRequestsModule } from './blood-requests/blood-requests.module';
 import { BloodUnitsModule } from './blood-units/blood-units.module';
 import { AppConfigModule } from './config/config.module';
 import { DispatchModule } from './dispatch/dispatch.module';
+import { DonorImpactModule } from './donor-impact/donor-impact.module';
 import { LocationHistoryModule } from './location-history/location-history.module';
 import { HospitalsModule } from './hospitals/hospitals.module';
 import { InventoryModule } from './inventory/inventory.module';
@@ -97,6 +98,7 @@ import type Redis from 'ioredis';
     MapsModule,
     BloodUnitsModule,
     LocationHistoryModule,
+    DonorImpactModule,
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
