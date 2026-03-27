@@ -6,25 +6,23 @@ import { CompensationModule } from '../common/compensation/compensation.module';
 
 import { BlockchainController } from './controllers/blockchain.controller';
 import { AdminGuard } from './guards/admin.guard';
+import { JobDeduplicationPlugin } from './plugins/job-deduplication.plugin';
 import { SorobanDlqProcessor } from './processors/soroban-dlq.processor';
 import { SorobanTxProcessor } from './processors/soroban-tx.processor';
 import { IdempotencyService } from './services/idempotency.service';
 import { QueueMetricsService } from './services/queue-metrics.service';
 import { SorobanService } from './services/soroban.service';
-import { JobDeduplicationPlugin } from './plugins/job-deduplication.plugin';
 
 @Module({
   imports: [
     CompensationModule,
-    BullModule.registerQueueAsync([
+    BullModule.registerQueueAsync(
       {
         name: 'soroban-tx-queue',
-        imports: [ConfigModule],
-        inject: [ConfigService],
         useFactory: (configService: ConfigService) => ({
           connection: {
-            host: configService.get<string>('REDIS_HOST', 'localhost'),
-            port: configService.get<number>('REDIS_PORT', 6379),
+            host: configService.get<string>('REDIS_HOST'),
+            port: configService.get<number>('REDIS_PORT'),
           },
           defaultJobOptions: {
             attempts: 5,
@@ -36,17 +34,17 @@ import { JobDeduplicationPlugin } from './plugins/job-deduplication.plugin';
             removeOnFail: false,
           },
         }),
+        inject: [ConfigService],
       },
       {
         name: 'soroban-dlq',
-        imports: [ConfigModule],
-        inject: [ConfigService],
         useFactory: (configService: ConfigService) => ({
           connection: {
-            host: configService.get<string>('REDIS_HOST', 'localhost'),
-            port: configService.get<number>('REDIS_PORT', 6379),
+            host: configService.get<string>('REDIS_HOST'),
+            port: configService.get<number>('REDIS_PORT'),
           },
         }),
+        inject: [ConfigService],
       },
     ]),
   ],
