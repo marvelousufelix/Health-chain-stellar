@@ -1,10 +1,7 @@
-import { BullModule } from '@nestjs/bullmq';
-import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
-import { ScheduleModule } from '@nestjs/schedule';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 
 import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
 
@@ -31,16 +28,6 @@ import { HospitalsModule } from './hospitals/hospitals.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { MapsModule } from './maps/maps.module';
 import { NotificationsModule } from './notifications/notifications.module';
-import { OrdersModule } from './orders/orders.module';
-import { FeePolicyModule } from './fee-policy/fee-policy.module';
-import { OrganizationsModule } from './organizations/organizations.module';
-import { REDIS_CLIENT } from './redis/redis.constants';
-import { RedisModule } from './redis/redis.module';
-import { RetentionModule } from './retention/retention.module';
-import { DeliveryProofModule } from './delivery-proof/delivery-proof.module';
-import { RidersModule } from './riders/riders.module';
-import { throttleGetTracker } from './throttler/throttle-tracker.util';
-import { ActivityLoggingInterceptor } from './user-activity/interceptors/activity-logging.interceptor';
 import { UserActivityModule } from './user-activity/user-activity.module';
 import { UsersModule } from './users/users.module';
 import { TrackingModule } from './tracking/tracking.module';
@@ -49,77 +36,30 @@ import type Redis from 'ioredis';
 
 @Module({
   imports: [
-    AppConfigModule,
-    ScheduleModule.forRoot(),
+    ConfigModule.forRoot({ isGlobal: true }),
+    EventEmitterModule.forRoot(),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (configService: ConfigService) => {
-        const nodeEnv = configService.get<string>('NODE_ENV', 'development');
-        const synchronize = nodeEnv === 'development';
-
-        DatabaseSyncGuard.validateSynchronizeConfig(nodeEnv, synchronize);
-
-        return {
-          type: 'postgres',
-          host: configService.get<string>('DATABASE_HOST', 'localhost'),
-          port: configService.get<number>('DATABASE_PORT', 5432),
-          username: configService.get<string>('DATABASE_USERNAME', 'postgres'),
-          password: configService.get<string>('DATABASE_PASSWORD', ''),
-          database: configService.get<string>('DATABASE_NAME', 'healthchain'),
-          entities: [__dirname + '/**/*.entity{.ts,.js}'],
-          synchronize,
-          logging: false,
-        };
-      },
-    }),
-    ThrottlerModule.forRootAsync({
-      imports: [ConfigModule, RedisModule],
-      inject: [ConfigService, REDIS_CLIENT],
-      useFactory: (configService: ConfigService, redis: Redis) => {
-        const useRedis =
-          configService.get<string>('THROTTLER_USE_REDIS', 'true') === 'true';
-        return {
-          throttlers: [
-            {
-              name: 'default',
-              ttl: 60_000,
-              limit: 100,
-            },
-          ],
-          ...(useRedis
-            ? { storage: new ThrottlerStorageRedisService(redis) }
-            : {}),
-          getTracker: throttleGetTracker,
-          errorMessage: 'Rate limit exceeded. Please try again later.',
-        };
-      },
-    }),
-    AuthModule,
-    UsersModule,
-    HospitalsModule,
-    InventoryModule,
-    OrdersModule,
-    RidersModule,
-    DispatchModule,
-    MapsModule,
-    BloodUnitsModule,
-    LocationHistoryModule,
-    DonorImpactModule,
-    BullModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('REDIS_HOST', 'localhost'),
-          port: configService.get<number>('REDIS_PORT', 6379),
-        },
+      useFactory: (config: ConfigService) => ({
+        type: 'postgres',
+        host: config.get<string>('DB_HOST', 'localhost'),
+        port: config.get<number>('DB_PORT', 5432),
+        username: config.get<string>('DB_USERNAME', 'postgres'),
+        password: config.get<string>('DB_PASSWORD', 'postgres'),
+        database: config.get<string>('DB_DATABASE', 'health_chain'),
+        autoLoadEntities: true,
+        synchronize: true, // DEV ONLY
       }),
+      inject: [ConfigService],
     }),
+    SorobanModule,
+    ApprovalModule,
+    DonationModule,
+    OrdersModule,
+    UsersModule,
+    AuthModule,
+    InventoryModule,
     NotificationsModule,
-    BlockchainModule,
-    OrganizationsModule,
-    BloodRequestsModule,
     UserActivityModule,
     EventsModule,
     RetentionModule,
@@ -144,8 +84,4 @@ import type Redis from 'ioredis';
     CorrelationIdService,
   ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    consumer.apply(CorrelationIdMiddleware).forRoutes('*');
-  }
-}
+export class AppModule {}
