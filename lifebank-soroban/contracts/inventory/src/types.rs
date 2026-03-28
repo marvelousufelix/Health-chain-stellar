@@ -280,6 +280,23 @@ pub enum DataKey {
 
     /// Counter for status changes on specific blood unit
     BloodUnitStatusChangeCount(u64), // u64 is blood_unit_id
+
+    /// Reservation record by reservation ID
+    Reservation(u64),
+
+    /// Counter for generating reservation IDs
+    ReservationCounter,
+}
+
+/// Reservation record for blood units locked for a specific requester
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Reservation {
+    pub unit_ids: Vec<u64>,
+    pub requester: Address,
+    pub created_timestamp: u64,
+    pub expiration_timestamp: u64,
+    pub request_id: u64,
 }
 
 #[contracttype]

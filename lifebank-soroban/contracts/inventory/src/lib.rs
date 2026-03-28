@@ -7,7 +7,7 @@ mod types;
 mod validation;
 
 use crate::error::ContractError;
-use crate::types::{BloodStatus, BloodType, BloodUnit, DataKey, is_valid_transition};
+use crate::types::{BloodStatus, BloodType, BloodUnit, DataKey, Reservation, is_valid_transition};
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Map, String, Vec};
 #[contract]
@@ -376,6 +376,146 @@ impl InventoryContract {
 
     pub fn get_status_change_count(env: Env, unit_id: u64) -> u64 {
         storage::get_blood_unit_status_change_count(&env, unit_id)
+    }
+
+    /// Reserve one or more blood units for a hospital requester.
+    ///
+    /// All units must be `Available` and not expired. On success every unit is
+    /// moved to `Reserved` and a time-bounded `Reservation` record is stored in
+    /// temporary storage (auto-purged by the ledger after `duration_seconds`).
+    ///
+    /// # Arguments
+    /// * `requester`        - Hospital address (must be authorized blood bank)
+    /// * `unit_ids`         - IDs of blood units to reserve
+    /// * `request_id`       - Caller-supplied correlation ID
+    /// * `duration_seconds` - How long the reservation is valid
+    ///
+    /// # Returns
+    /// Unique reservation ID
+    pub fn reserve_blood(
+        env: Env,
+        requester: Address,
+        unit_ids: Vec<u64>,
+        request_id: u64,
+        duration_seconds: u64,
+    ) -> Result<u64, ContractError> {
+        requester.require_auth();
+
+        if !storage::is_authorized_bank(&env, &requester) {
+            return Err(ContractError::NotAuthorizedBloodBank);
+        }
+
+        let current_time = env.ledger().timestamp();
+
+        // Validate all units before making any changes (all-or-nothing)
+        for i in 0..unit_ids.len() {
+            let unit_id = unit_ids.get(i).ok_or(ContractError::NotFound)?;
+            let unit = storage::get_blood_unit(&env, unit_id).ok_or(ContractError::NotFound)?;
+            if unit.status != BloodStatus::Available {
+                return Err(ContractError::BloodUnitNotAvailable);
+            }
+            if unit.is_expired(current_time) {
+                return Err(ContractError::BloodUnitExpired);
+            }
+        }
+
+        let reservation_id = storage::increment_reservation_id(&env);
+        let expiration = current_time + duration_seconds;
+
+        let reservation = Reservation {
+            unit_ids: unit_ids.clone(),
+            requester: requester.clone(),
+            created_timestamp: current_time,
+            expiration_timestamp: expiration,
+            request_id,
+        };
+
+        storage::set_reservation(&env, reservation_id, &reservation);
+
+        // Update all unit statuses to Reserved
+        for i in 0..unit_ids.len() {
+            let unit_id = unit_ids.get(i).ok_or(ContractError::NotFound)?;
+            let mut unit =
+                storage::get_blood_unit(&env, unit_id).ok_or(ContractError::NotFound)?;
+            let old_status = unit.status;
+            unit.status = BloodStatus::Reserved;
+            storage::set_blood_unit(&env, &unit);
+            storage::remove_from_status_index(&env, unit_id, old_status);
+            storage::add_to_status_index(&env, &unit);
+        }
+
+        events::emit_blood_reserved(&env, reservation_id, &requester, unit_ids.len());
+
+        Ok(reservation_id)
+    }
+
+    /// Release a reservation, returning all units to `Available`.
+    ///
+    /// Can be called by anyone — the reservation record is the authority.
+    /// If the reservation has already expired (ledger time > expiration_timestamp)
+    /// the call still succeeds so callers can clean up stale reservations.
+    pub fn release_reservation(env: Env, reservation_id: u64) -> Result<(), ContractError> {
+        let reservation = storage::get_reservation(&env, reservation_id)
+            .ok_or(ContractError::ReservationNotFound)?;
+
+        for i in 0..reservation.unit_ids.len() {
+            let unit_id = reservation
+                .unit_ids
+                .get(i)
+                .ok_or(ContractError::NotFound)?;
+            if let Some(mut unit) = storage::get_blood_unit(&env, unit_id) {
+                if unit.status == BloodStatus::Reserved {
+                    unit.status = BloodStatus::Available;
+                    storage::set_blood_unit(&env, &unit);
+                    storage::remove_from_status_index(&env, unit_id, BloodStatus::Reserved);
+                    storage::add_to_status_index(&env, &unit);
+                }
+            }
+        }
+
+        storage::remove_reservation(&env, reservation_id);
+        events::emit_reservation_released(&env, reservation_id);
+
+        Ok(())
+    }
+
+    /// Get a reservation by ID.
+    pub fn get_reservation(env: Env, reservation_id: u64) -> Result<Reservation, ContractError> {
+        storage::get_reservation(&env, reservation_id).ok_or(ContractError::ReservationNotFound)
+    }
+
+    /// Reserve multiple batches of blood units in a single transaction.
+    ///
+    /// Each element of `batch` is a `(unit_ids, request_id, duration_seconds)` tuple.
+    /// Returns a `Vec<u64>` of reservation IDs in the same order as the input.
+    pub fn batch_reserve_blood(
+        env: Env,
+        requester: Address,
+        batch: Vec<(Vec<u64>, u64, u64)>,
+    ) -> Result<Vec<u64>, ContractError> {
+        requester.require_auth();
+
+        if !storage::is_authorized_bank(&env, &requester) {
+            return Err(ContractError::NotAuthorizedBloodBank);
+        }
+
+        let mut reservation_ids: Vec<u64> = Vec::new(&env);
+
+        for i in 0..batch.len() {
+            let (unit_ids, request_id, duration_seconds) =
+                batch.get(i).ok_or(ContractError::InvalidInput)?;
+
+            let res_id = Self::reserve_blood(
+                env.clone(),
+                requester.clone(),
+                unit_ids,
+                request_id,
+                duration_seconds,
+            )?;
+            reservation_ids.push_back(res_id);
+        }
+
+        Ok(reservation_ids)
     }
 }
 
