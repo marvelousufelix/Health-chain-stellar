@@ -16,6 +16,7 @@ import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { BlockchainModule } from './blockchain/blockchain.module';
 import { BloodRequestsModule } from './blood-requests/blood-requests.module';
 import { BloodUnitsModule } from './blood-units/blood-units.module';
+import { EventsModule } from './events/events.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { CorrelationIdService } from './common/middleware/correlation-id.service';
 import { AppConfigModule } from './config/config.module';
@@ -25,7 +26,6 @@ import { DonorImpactModule } from './donor-impact/donor-impact.module';
 import { LocationHistoryModule } from './location-history/location-history.module';
 import { HospitalsModule } from './hospitals/hospitals.module';
 import { InventoryModule } from './inventory/inventory.module';
-import { LocationHistoryModule } from './location-history/location-history.module';
 import { MapsModule } from './maps/maps.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { OrdersModule } from './orders/orders.module';
@@ -40,9 +40,6 @@ import { throttleGetTracker } from './throttler/throttle-tracker.util';
 import { ActivityLoggingInterceptor } from './user-activity/interceptors/activity-logging.interceptor';
 import { UserActivityModule } from './user-activity/user-activity.module';
 import { UsersModule } from './users/users.module';
-import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
-import { CorrelationIdService } from './common/middleware/correlation-id.service';
-import { DatabaseSyncGuard } from './config/database-sync.guard';
 import { TrackingModule } from './tracking/tracking.module';
 
 import type Redis from 'ioredis';
@@ -124,9 +121,8 @@ import type Redis from 'ioredis';
     EventsModule,
     RetentionModule,
     TrackingModule,
-  ],
     FeePolicyModule,
-  ]
+  ],
   controllers: [AppController],
   providers: [
     AppService,
